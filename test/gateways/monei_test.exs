@@ -154,7 +154,7 @@ defmodule Gringotts.Gateways.MoneiTest do
       Bypass.expect_once(bypass, "POST", "/v1/payments", fn conn ->
         p_conn = parse(conn)
         params = p_conn.body_params
-        assert params["createRegistration"] == "true"
+        assert params["createRegistration"] == true
         assert params["customParameters"] == @extra_opts[:custom]
         assert params["merchantInvoiceId"] == randoms[:invoice_id]
         assert params["merchantTransactionId"] == randoms[:transaction_id]
@@ -219,7 +219,7 @@ defmodule Gringotts.Gateways.MoneiTest do
       Bypass.expect_once(bypass, "POST", "/v1/payments", fn conn ->
         p_conn = parse(conn)
         params = p_conn.body_params
-        assert params["createRegistration"] == "true"
+        assert params["createRegistration"] == true
         Conn.resp(conn, 200, @register_success)
       end)
 
@@ -325,10 +325,10 @@ defmodule Gringotts.Gateways.MoneiTest do
         "/v1/registrations/7214344242e11af79c0b9e7b4f3f6234",
         fn conn ->
           p_conn = parse(conn)
-          params = p_conn.query_params
-          assert params["authentication.entityId"] == "some_secret_entity_id"
-          assert params["authentication.password"] == "some_secret_password"
-          assert params["authentication.userId"] == "some_secret_user_id"
+          headers = p_conn.req_headers
+          auth_header = Enum.find(headers, &match?({"authorization", _}, &1))
+          refute is_nil(auth_header)
+          assert {"authorization", "some_secret_password"} == auth_header
           Conn.resp(conn, 200, "<html></html>")
         end
       )
@@ -360,7 +360,10 @@ defmodule Gringotts.Gateways.MoneiTest do
   end
 
   def parse(conn, opts \\ []) do
-    opts = Keyword.put_new(opts, :parsers, [Parsers.URLENCODED])
+    opts =
+      opts
+      |> Keyword.put_new(:parsers, [Parsers.JSON])
+      |> Keyword.put_new(:json_decoder, Jason)
     Parsers.call(conn, Parsers.init(opts))
   end
 end

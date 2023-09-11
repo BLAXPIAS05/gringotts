@@ -149,7 +149,7 @@ defmodule Gringotts.Gateways.Monei do
   alias Gringotts.{CreditCard, Money, Response}
 
   @base_url "https://test.monei-api.net"
-  @default_headers ["Content-Type": "application/x-www-form-urlencoded", charset: "UTF-8"]
+  @default_headers ["Content-Type": "application/json", charset: "UTF-8"]
 
   @supported_currencies ~w(AED AFN ANG AOA AWG AZN BAM BGN BRL BYN CDF CHF CUC
     EGP EUR GBP GEL GHS MDL MGA MKD MWK MZN NAD NGN NIO NOK NPR NZD PAB PEN PGK
@@ -421,13 +421,13 @@ defmodule Gringotts.Gateways.Monei do
     ]
   end
 
-  defp auth_params(opts) do
-    [
-      "authentication.userId": opts[:config][:userId],
-      "authentication.password": opts[:config][:password],
-      "authentication.entityId": opts[:config][:entityId]
-    ]
-  end
+  # defp auth_params(opts) do
+  #   [
+  #     "authentication.userId": opts[:config][:userId],
+  #     "authentication.password": opts[:config][:password],
+  #     "authentication.entityId": opts[:config][:entityId]
+  #   ]
+  # end
 
   defp auth_headers(opts) do
     [{:Authorization, opts[:config][:password]} | @default_headers]
@@ -443,11 +443,9 @@ defmodule Gringotts.Gateways.Monei do
         {:error, Response.error(reason: reason)}
 
       validated_params ->
+        body = Jason.encode!(params ++ validated_params |> Enum.into(%{}))
         url
-        |> HTTPoison.post(
-          {:form, params ++ validated_params ++ auth_params(opts)},
-          auth_headers(opts)
-        )
+        |> HTTPoison.post(body, auth_headers(opts))
         |> respond
     end
   end
@@ -455,11 +453,9 @@ defmodule Gringotts.Gateways.Monei do
   # This clause is only used by `unstore/2`
   defp commit(:delete, endpoint, _params, opts) do
     base_url = "#{base_url(opts)}/#{version(opts)}/#{endpoint}"
-    auth_params = auth_params(opts)
-    query_string = auth_params |> URI.encode_query()
 
-    (base_url <> "?" <> query_string)
-    |> HTTPoison.delete()
+    base_url
+    |> HTTPoison.delete(auth_headers(opts))
     |> respond
   end
 
@@ -555,7 +551,7 @@ defmodule Gringotts.Gateways.Monei do
           {:cont, acc ++ make(action_type, "shipping.customer", v)}
 
         :custom ->
-          {:cont, acc ++ make_custom(v)}
+          {:cont, acc ++ [{"customParameters", v}]}
 
         :register ->
           {:cont, acc ++ make(action_type, :register, v)}
@@ -582,9 +578,9 @@ defmodule Gringotts.Gateways.Monei do
     end
   end
 
-  defp make_custom(custom_map) do
-    Enum.into(custom_map, [], fn {k, v} -> {"customParameters[#{k}]", "#{v}"} end)
-  end
+  # defp make_custom(custom_map) do
+  #   Enum.into(custom_map, %{}, fn {k, v} -> {"customParameters[#{k}]", "#{v}"} end)
+  # end
 
   defp base_url(opts), do: opts[:config][:test_url] || @base_url
   defp version(opts), do: opts[:config][:api_version] || @version
