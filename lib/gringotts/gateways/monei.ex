@@ -429,6 +429,10 @@ defmodule Gringotts.Gateways.Monei do
     ]
   end
 
+  defp auth_headers(opts) do
+    [{:Authorization, opts[:config][:password]} | @default_headers]
+  end
+
   # Makes the request to MONEI's network.
   @spec commit(atom, String.t(), keyword, keyword) :: {:ok | :error, Response.t()}
   defp commit(:post, endpoint, params, opts) do
@@ -442,7 +446,7 @@ defmodule Gringotts.Gateways.Monei do
         url
         |> HTTPoison.post(
           {:form, params ++ validated_params ++ auth_params(opts)},
-          @default_headers
+          auth_headers(opts)
         )
         |> respond
     end

@@ -134,10 +134,10 @@ defmodule Gringotts.Gateways.MoneiTest do
     test "that all auth info is picked.", %{bypass: bypass, auth: auth} do
       Bypass.expect_once(bypass, "POST", "/v1/payments", fn conn ->
         p_conn = parse(conn)
-        params = p_conn.body_params
-        assert params["authentication.entityId"] == "some_secret_entity_id"
-        assert params["authentication.password"] == "some_secret_password"
-        assert params["authentication.userId"] == "some_secret_user_id"
+        headers = p_conn.req_headers
+        auth_header = Enum.find(headers, &match?({"authorization", _}, &1))
+        refute is_nil(auth_header)
+        assert {"authorization", "some_secret_password"} == auth_header
         Conn.resp(conn, 200, @auth_success)
       end)
 
