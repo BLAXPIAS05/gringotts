@@ -4,6 +4,7 @@ defmodule Gringotts.CreditCard do
   """
 
   defstruct [:number, :month, :year, :first_name, :last_name, :verification_code, :brand]
+  alias __MODULE__
 
   @typedoc """
   Represents a Credit Card.
@@ -49,5 +50,16 @@ defmodule Gringotts.CreditCard do
   def full_name(card) do
     name = "#{card.first_name} #{card.last_name}"
     String.trim(name)
+  end
+
+  def expiration_month(%CreditCard{month: month}) do
+    month
+    |> Integer.to_string()
+    |> String.pad_leading(2, "0")
+  end
+
+  def expiration_year(%CreditCard{year: year}) do
+    year
+    |> Integer.to_string()
   end
 end

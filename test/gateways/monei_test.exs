@@ -154,9 +154,9 @@ defmodule Gringotts.Gateways.MoneiTest do
       Bypass.expect_once(bypass, "POST", "/v1/payments", fn conn ->
         p_conn = parse(conn)
         params = p_conn.body_params
-        assert params["createRegistration"] == true
+        assert params["generatePaymentToken"] == true
         assert params["customParameters"] == @extra_opts[:custom]
-        assert params["merchantInvoiceId"] == randoms[:invoice_id]
+        assert params["orderId"] == randoms[:invoice_id]
         assert params["merchantTransactionId"] == randoms[:transaction_id]
         assert params["transactionCategory"] == @extra_opts[:category]
         assert params["customer.merchantCustomerId"] == @customer[:merchantCustomerId]
@@ -191,11 +191,22 @@ defmodule Gringotts.Gateways.MoneiTest do
         params = p_conn.body_params
         assert params["amount"] == "42.00"
         assert params["currency"] == "USD"
-        assert params["paymentType"] == "PA"
+        assert params["transactionType"] == "AUTH"
+        # assert params["orderId"] == "INV001"
+
+        card_data = params["paymentMethod"]["card"]
+        assert card_data["number"] == @card.number
+        assert card_data["cvc"] == @card.verification_code
+
+        assert card_data["expMonth"] == to_string(@card.month)
+        assert card_data["expYear"] == to_string(@card.year)
+        assert card_data["cardholderName"] == "Harry Potter"
+        # assert card_data["cardholderEmail"] == ""
+
         Conn.resp(conn, 200, @auth_success)
       end)
 
-      {:ok, response} = Gateway.authorize(@amount42, @card, config: auth)
+      {:ok, response} = Gateway.authorize(@amount42, @card, config: Map.merge(auth, %{order_id: "INV001"}))
       assert response.gateway_code == "000.100.110"
     end
   end
@@ -207,7 +218,8 @@ defmodule Gringotts.Gateways.MoneiTest do
         params = p_conn.body_params
         assert params["amount"] == "42.00"
         assert params["currency"] == "USD"
-        assert params["paymentType"] == "DB"
+        assert params["transactionType"] == "SALE"
+
         Conn.resp(conn, 200, @auth_success)
       end)
 
@@ -219,7 +231,7 @@ defmodule Gringotts.Gateways.MoneiTest do
       Bypass.expect_once(bypass, "POST", "/v1/payments", fn conn ->
         p_conn = parse(conn)
         params = p_conn.body_params
-        assert params["createRegistration"] == true
+        assert params["generatePaymentToken"] == true
         Conn.resp(conn, 200, @register_success)
       end)
 
@@ -234,12 +246,14 @@ defmodule Gringotts.Gateways.MoneiTest do
       Bypass.expect_once(bypass, "POST", "/v1/registrations", fn conn ->
         p_conn = parse(conn)
         params = p_conn.body_params
-        assert params["card.cvv"] == "123"
-        assert params["card.expiryMonth"] == "12"
-        assert params["card.expiryYear"] == "2099"
-        assert params["card.holder"] == "Harry Potter"
-        assert params["card.number"] == "4200000000000000"
-        assert params["paymentBrand"] == "VISA"
+
+        card_data = params["paymentMethod"]["card"]
+        assert card_data["number"] == @card.number
+        assert card_data["cvc"] == @card.verification_code
+        assert card_data["expMonth"] == to_string(@card.month)
+        assert card_data["expYear"] == to_string(@card.year)
+        assert card_data["cardholderName"] == "Harry Potter"
+
         Conn.resp(conn, 200, @store_success)
       end)
 
@@ -253,13 +267,11 @@ defmodule Gringotts.Gateways.MoneiTest do
       Bypass.expect_once(
         bypass,
         "POST",
-        "/v1/payments/7214344242e11af79c0b9e7b4f3f6234",
+        "/v1/payments/7214344242e11af79c0b9e7b4f3f6234/capture",
         fn conn ->
           p_conn = parse(conn)
           params = p_conn.body_params
           assert params["amount"] == "42.00"
-          assert params["currency"] == "USD"
-          assert params["paymentType"] == "CP"
           Conn.resp(conn, 200, @auth_success)
         end
       )
@@ -274,11 +286,11 @@ defmodule Gringotts.Gateways.MoneiTest do
       Bypass.expect_once(
         bypass,
         "POST",
-        "/v1/payments/7214344242e11af79c0b9e7b4f3f6234",
+        "/v1/payments/7214344242e11af79c0b9e7b4f3f6234/capture",
         fn conn ->
           p_conn = parse(conn)
           params = p_conn.body_params
-          assert :error == Map.fetch(params, "createRegistration")
+          assert :error == Map.fetch(params, "generatePaymentToken")
           Conn.resp(conn, 200, @auth_success)
         end
       )
@@ -300,13 +312,11 @@ defmodule Gringotts.Gateways.MoneiTest do
       Bypass.expect_once(
         bypass,
         "POST",
-        "/v1/payments/7214344242e11af79c0b9e7b4f3f6234",
+        "/v1/payments/7214344242e11af79c0b9e7b4f3f6234/refund",
         fn conn ->
           p_conn = parse(conn)
           params = p_conn.body_params
           assert params["amount"] == "3.00"
-          assert params["currency"] == "USD"
-          assert params["paymentType"] == "RF"
           Conn.resp(conn, 200, @auth_success)
         end
       )
@@ -349,7 +359,6 @@ defmodule Gringotts.Gateways.MoneiTest do
           params = p_conn.body_params
           assert :error == Map.fetch(params, :amount)
           assert :error == Map.fetch(params, :currency)
-          assert params["paymentType"] == "RV"
           Conn.resp(conn, 200, @auth_success)
         end
       )

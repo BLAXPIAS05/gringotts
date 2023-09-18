@@ -213,14 +213,14 @@ defmodule Gringotts.Gateways.Monei do
   @spec authorize(Money.t(), CreditCard.t(), keyword) :: {:ok | :error, Response.t()}
   def authorize(amount, %CreditCard{} = card, opts) do
     {currency, value} = Money.to_string(amount)
+    options = Enum.into(opts, %{})
 
     params =
-      [
-        paymentType: "PA",
-        amount: value
-      ] ++ card_params(card)
+      card
+      |> card_params()
+      |> Map.merge(%{amount: value, transactionType: "AUTH"})
 
-    commit(:post, "payments", params, [{:currency, currency} | opts])
+    commit(:post, "payments", params, Map.merge(options, %{currency: currency}))
   end
 
   @doc """
@@ -251,12 +251,16 @@ defmodule Gringotts.Gateways.Monei do
   def capture(<<payment_id::bytes-size(32)>>, amount, opts) do
     {currency, value} = Money.to_string(amount)
 
-    params = [
-      paymentType: "CP",
-      amount: value
-    ]
+    options =
+      opts
+      |> Enum.into(%{})
+      |> Map.merge(%{action: :capture, currency: currency})
 
-    commit(:post, "payments/#{payment_id}", params, [{:currency, currency} | opts])
+    params = %{
+      amount: value
+    }
+
+    commit(:post, "payments/#{payment_id}/capture", params, options)
   end
 
   @doc """
@@ -284,14 +288,14 @@ defmodule Gringotts.Gateways.Monei do
   @spec purchase(Money.t(), CreditCard.t(), keyword) :: {:ok | :error, Response.t()}
   def purchase(amount, %CreditCard{} = card, opts) do
     {currency, value} = Money.to_string(amount)
+    options = Enum.into(opts, %{})
 
     params =
-      [
-        paymentType: "DB",
-        amount: value
-      ] ++ card_params(card)
+      card
+      |> card_params()
+      |> Map.merge(%{amount: value, transactionType: "SALE"})
 
-    commit(:post, "payments", params, [{:currency, currency} | opts])
+    commit(:post, "payments", params, Map.merge(options, %{currency: currency}))
   end
 
   @doc """
@@ -316,13 +320,13 @@ defmodule Gringotts.Gateways.Monei do
   @spec refund(Money.t(), String.t(), keyword) :: {:ok | :error, Response.t()}
   def refund(amount, <<payment_id::bytes-size(32)>>, opts) do
     {currency, value} = Money.to_string(amount)
+    options = Enum.into(opts, %{})
 
-    params = [
-      paymentType: "RF",
+    params = %{
       amount: value
-    ]
+    }
 
-    commit(:post, "payments/#{payment_id}", params, [{:currency, currency} | opts])
+    commit(:post, "payments/#{payment_id}/refund", params, Map.merge(options, %{currency: currency}))
   end
 
   @doc """
@@ -354,7 +358,9 @@ defmodule Gringotts.Gateways.Monei do
   @spec store(CreditCard.t(), keyword) :: {:ok | :error, Response.t()}
   def store(%CreditCard{} = card, opts) do
     params = card_params(card)
-    commit(:post, "registrations", params, opts)
+    options = Enum.into(opts, %{})
+
+    commit(:post, "registrations", params, options)
   end
 
   @doc """
@@ -365,10 +371,11 @@ defmodule Gringotts.Gateways.Monei do
   Deletes previously stored payment-source data.
   """
   @spec unstore(String.t(), keyword) :: {:ok | :error, Response.t()}
-  def unstore(registration_id, opts)
 
   def unstore(<<registration_id::bytes-size(32)>>, opts) do
-    commit(:delete, "registrations/#{registration_id}", [], opts)
+    options = Enum.into(opts, %{})
+
+    commit(:delete, "registrations/#{registration_id}", %{}, options)
   end
 
   @doc """
@@ -403,47 +410,44 @@ defmodule Gringotts.Gateways.Monei do
       iex> {:ok, void_result} = Gringotts.void(Gringotts.Gateways.Monei, auth_result.id, opts)
   """
   @spec void(String.t(), keyword) :: {:ok | :error, Response.t()}
-  def void(payment_id, opts)
 
   def void(<<payment_id::bytes-size(32)>>, opts) do
-    params = [paymentType: "RV"]
-    commit(:post, "payments/#{payment_id}", params, opts)
+    options = Enum.into(opts, %{})
+
+    commit(:post, "payments/#{payment_id}", %{}, options)
   end
 
   defp card_params(card) do
-    [
-      "card.number": card.number,
-      "card.holder": CreditCard.full_name(card),
-      "card.expiryMonth": card.month |> Integer.to_string() |> String.pad_leading(2, "0"),
-      "card.expiryYear": card.year |> Integer.to_string(),
-      "card.cvv": card.verification_code,
-      paymentBrand: card.brand
-    ]
+    %{
+      paymentMethod: %{
+        card: %{
+          number: card.number,
+          cvc: card.verification_code,
+          expMonth: CreditCard.expiration_month(card),
+          expYear: CreditCard.expiration_year(card),
+          cardholderName: CreditCard.full_name(card)
+        }
+      }
+    }
   end
-
-  # defp auth_params(opts) do
-  #   [
-  #     "authentication.userId": opts[:config][:userId],
-  #     "authentication.password": opts[:config][:password],
-  #     "authentication.entityId": opts[:config][:entityId]
-  #   ]
-  # end
 
   defp auth_headers(opts) do
     [{:Authorization, opts[:config][:password]} | @default_headers]
   end
 
   # Makes the request to MONEI's network.
-  @spec commit(atom, String.t(), keyword, keyword) :: {:ok | :error, Response.t()}
+  @spec commit(atom, String.t(), map, map) :: {:ok | :error, Response.t()}
   defp commit(:post, endpoint, params, opts) do
     url = "#{base_url(opts)}/#{version(opts)}/#{endpoint}"
 
-    case expand_params(Keyword.delete(opts, :config), params[:paymentType]) do
+    action = Map.get(opts, :action)
+
+    case expand_params(Map.drop(opts, [:action, :config]), action) do
       {:error, reason} ->
         {:error, Response.error(reason: reason)}
 
       validated_params ->
-        body = Jason.encode!(params ++ validated_params |> Enum.into(%{}))
+        body = Jason.encode!(Map.merge(params, validated_params))
         url
         |> HTTPoison.post(body, auth_headers(opts))
         |> respond
@@ -538,8 +542,12 @@ defmodule Gringotts.Gateways.Monei do
         :shipping ->
           {:cont, acc ++ make(action_type, "shipping", v)}
 
+        # for backward compatibility
         :invoice_id ->
-          {:cont, [{"merchantInvoiceId", v} | acc]}
+            {:cont, [{"orderId", v} | acc]}
+
+        :order_id ->
+          {:cont, [{"orderId", v} | acc]}
 
         :transaction_id ->
           {:cont, [{"merchantTransactionId", v} | acc]}
@@ -554,12 +562,20 @@ defmodule Gringotts.Gateways.Monei do
           {:cont, acc ++ [{"customParameters", v}]}
 
         :register ->
-          {:cont, acc ++ make(action_type, :register, v)}
+          register = if v and action_type != :capture, do: [generatePaymentToken: true], else: []
+          {:cont, acc ++ register}
 
         unsupported ->
           {:halt, {:error, "Unsupported optional param '#{unsupported}'"}}
       end
     end)
+    |> case do
+      params when is_list(params) ->
+        Enum.into(params, %{})
+
+      error ->
+        error
+    end
   end
 
   defp valid_currency?(currency) do
