@@ -148,7 +148,7 @@ defmodule Gringotts.Gateways.Monei do
   use Gringotts.Adapter, required_config: [:userId, :entityId, :password]
   alias Gringotts.{CreditCard, Money, Response}
 
-  @base_url "https://test.monei-api.net"
+  @base_url "https://api.monei.com"
   @default_headers ["Content-Type": "application/json", charset: "UTF-8"]
 
   @supported_currencies ~w(AED AFN ANG AOA AWG AZN BAM BGN BRL BYN CDF CHF CUC
@@ -448,6 +448,11 @@ defmodule Gringotts.Gateways.Monei do
 
       validated_params ->
         body = Jason.encode!(Map.merge(params, validated_params))
+          |> IO.inspect(label: "----------------------------body-->")
+
+        headers = auth_headers(opts)
+        |> IO.inspect(label: "----------------------------headers-->")
+
         url
         |> HTTPoison.post(body, auth_headers(opts))
         |> respond
@@ -514,8 +519,52 @@ defmodule Gringotts.Gateways.Monei do
     verify(non_nil_params)
   end
 
+  defp parse_response(%{"id" => id} = response) do
+    # {"accountId" => "5b85ae77-8322-46e6-9b2a-8cd76a56b190",
+    # "amount" => 42,
+    # "authorizationCode" => "379826",
+    # "createdAt" => 1695077367,
+    # "currency" => "EUR",
+    # "customer" => %{"name" => "Harry Potter"},
+    # "id" => "fd1b39c6648e8e60547bab80de2fd6b8550e3732",
+    # "livemode" => false,
+    # "nextAction" => %{
+    #   "redirectUrl" => "https://secure.monei.com/payments/fd1b39c6648e8e60547bab80de2fd6b8550e3732/receipt",
+    #   "type" => "COMPLETE"},
+    # "orderId" => "TEST1234",
+    # "paymentMethod" => %{
+    #   "card" => %{"brand" => "visa", "cardholderName" => "Harry Potter",
+    #   "country" => "PL", "expiration" => 2048544000, "last4" => "4414",
+    #   "threeDSecure" => true, "threeDSecureFlow" => "DIRECT", "threeDSecureVersion" => "2.1.0",
+    #   "type" => "credit"}, "method" => "card"
+    # },
+    # "sessionDetails" => %{},
+    # "shop" => %{"name" => "My company"},
+    # "status" => "SUCCEEDED",
+    # "statusCode" => "E000",
+    # "statusMessage" => "Transaction approved",
+    # "traceDetails" => %{"apiKey" => "pk_test_****763f", "countryCode" => "US", "deviceType" => "desktop", "ip" => "24.128.96.103", "lang" => "en", "userAgent" => "hackney/1.18.2"}, "updatedAt" => 1695077371})
+    results = [
+      id: id,
+      # token: data["registrationId"],
+      gateway_code: response["statusCode"],
+      message: response["statusMessage"],
+      # fraud_review: data["risk"],
+      # cvc_result: @cvc_code_translator[result["cvvResponse"]],
+      # avs_result: %{address: address, zip_code: zip_code}
+    ]
+
+    non_nil_params = Enum.filter(results, fn {_, v} -> v != nil end)
+    verify(non_nil_params)
+
+  end
+
+  defp parse_response(_error) do
+    {:error, "could not parse response"}
+  end
+
   defp verify(results) do
-    if String.match?(results[:gateway_code], ~r{^(000\.000\.|000\.100\.1|000\.[36])}) do
+    if String.match?(results[:gateway_code], ~r{^(E000|000\.000\.|000\.100\.1|000\.[36])}) do
       {:ok, results}
     else
       {:not_ok, [{:reason, results[:message]} | results]}
